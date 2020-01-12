@@ -1,0 +1,26 @@
+---
+title: "time-series-study"
+output: rmarkdown::html_vignette
+vignette: >
+  %\VignetteIndexEntry{time-series-study}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r, include = FALSE}
+knitr::opts_chunk$set(
+  collapse = TRUE,
+  comment = "#>"
+)
+```
+
+## Big Ideas from Hadley
+
+Isolate the monthly trend:
+
+> simple as `lm(outcome ~ factor(month))`
+
+Find the residuals (substract monthly trend from series).
+
+This gives you the overall trend over time.
+
