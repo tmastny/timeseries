@@ -24,3 +24,36 @@ Find the residuals (substract monthly trend from series).
 
 This gives you the overall trend over time.
 
+## ARIMA
+
+### Auto-regression
+
+> predict y_t on {y_i}_0^{t-1}
+
+Potential way to fit (data analysis using hierarchial/multi-level regression):
+```r
+n <- length (y)
+y.lag <- c (NA, y[1:(n-1)]) lm.lag <- lm (y ~ y.lag)
+```
+
+
+### Moving Average
+
+> y_t predicted by values of {y_i}_0^{t-1} predicted values
+
+#### ARIMA
+> combination
+
+
+
+## Exponential Smoothing
+
+## time series regression methods
+
+
+## packages
+
+forecast -> fable
+* ARIMA and exponential smoothing
+
+

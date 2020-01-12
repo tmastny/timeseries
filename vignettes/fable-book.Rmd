@@ -1,0 +1,480 @@
+---
+title: "fable-book"
+output: rmarkdown::html_vignette
+vignette: >
+  %\VignetteIndexEntry{fable-book}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r, include = FALSE}
+knitr::opts_chunk$set(
+  collapse = TRUE,
+  comment = "#>"
+)
+```
+
+## Fable Book
+
+
+### 2.1
+
+```{r}
+library(tsibble)
+library(dplyr)
+
+y <- tsibble(Year = 2015:2019, Observation = c(123,39,78,52,110), index = Year)
+y
+```
+
+Really this is multiple time-series of events and sex:
+
+```{r}
+tsibbledata::olympic_running
+```
+
+```{r}
+tsibbledata::olympic_running %>%
+  dplyr::as_tibble() %>%
+  dplyr::count(Length, Sex)
+```
+
+If their are duplicated rows, `tsibble` will through an error
+because it is not a valid time-series.
+
+```{r}
+tsibbledata::PBS %>%
+  select(Month, Concession, Type, Cost)
+```
+
+```{r}
+tsibbledata::PBS %>%
+  filter(ATC2=="A10") %>%
+  select(Month, Concession, Type, Cost)
+```
+
+`tsibble` automatically selects month, the index variable.
+
+Also automatically grouped by index:
+
+```{r}
+tsibbledata::PBS %>%
+  filter(ATC2=="A10") %>%
+  select(Month, Concession, Type, Cost) %>%
+  summarise(TotalC = sum(Cost))
+```
+
+```{r}
+a10 <- tsibbledata::PBS %>%
+  filter(ATC2=="A10") %>%
+  select(Month, Concession, Type, Cost) %>%
+  summarise(TotalC = sum(Cost)) %>%
+  mutate(Cost = TotalC/1e6)
+a10
+```
+
+
+## 2.2
+
+```{r}
+tsibbledata::ansett
+```
+
+Complicated vs. simple time series
+
+```{r}
+melsyd_economy <- tsibbledata::ansett %>%
+  filter(Airports == "MEL-SYD", Class=="Economy")
+
+library(ggplot2)
+
+melsyd_economy %>%
+  autoplot(Passengers) +
+    labs(title = "Ansett economy class passengers", subtitle = "Melbourne-Sydney") +
+    xlab("Year")
+```
+
+```{r}
+a10 %>% autoplot(Cost) +
+  ggtitle("Antidiabetic drug sales") +
+  ylab("$ million") + xlab("Year")
+```
+
+## 2.2
+
+Time series vocab:
+
+### Trend
+
+long-term increase of decrease of data
+
+### Seasonal
+
+changes during a fixed and know period
+
+### Cyclic
+
+changes not at a fixed frequency
+
+
+## 2.4
+
+Season plots: data plotted in the season that they occured.
+> see for example, when Hadley plotted against the year
+to look at the decreasing year-end housing permits
+
+```{r}
+a10 %>% feasts::gg_season(Cost, labels = "both") +
+  ylab("$ million") +
+  ggtitle("Seasonal plot: antidiabetic drug sales")
+```
+
+These plots show the underlying season pattern more clearly.
+
+```{r}
+library(feasts)
+
+a10 %>%
+  gg_subseries(Cost) +
+    ylab("$ million") +
+    xlab("Year") +
+    ggtitle("Seasonal subseries plot: antidiabetic drug sales")
+```
+
+Shows diffferent seasonality patterns within months.
+
+Also shows changes in seasonality over time (growth through all months over years).
+
+
+## 2.6
+
+Relationships **between** time series
+> see for example, Hadley plotting between cities
+
+Also, plotting series against each other:
+
+```{r}
+library(lubridate)
+
+tsibbledata::vic_elec %>%
+  filter(year(Time) == 2014) %>%
+  autoplot(Demand) +
+    xlab("Year: 2014") + ylab(NULL) +
+    ggtitle("Half-hourly electricity demand: Victoria, Australia")
+```
+
+```{r}
+tsibbledata::vic_elec %>%
+  filter(year(Time) == 2014) %>%
+  autoplot(Temperature) +
+    xlab("Year: 2014") + ylab(NULL) +
+    ggtitle("Half-hourly electricity demand: Victoria, Australia")
+```
+
+We roughly see when demand is high when temperature is low in July.
+
+```{r}
+tsibbledata::vic_elec %>%
+  filter(year(Time) == 2014) %>%
+  ggplot(aes(x = Temperature, y = Demand)) +
+    geom_point() +
+    ylab("Demand (GW)") + xlab("Temperature (Celsius)")
+```
+
+## 2.7
+
+Lag plots
+
+```{r}
+recent_production <- tsibbledata::aus_production %>%
+  filter(year(Quarter) >= 1992)
+recent_production %>% gg_lag(Beer, geom="point")
+```
+
+Positive correlation on 4 and 8 indicate seasonality.
+
+## 2.8 
+
+Autocorrelation
+
+These correspond with the correlation we see in Section 2.7 with lag plots.
+
+```{r}
+recent_production %>% ACF(Beer, lag_max = 9)
+```
+
+We see positive correlation at 4 and 8 and negative correlation at 2 and 6,
+and little correlation elsewhere.
+
+```{r}
+recent_production %>% ACF(Beer) %>% autoplot()
+```
+
+```{r}
+a10 %>% ACF(Cost, lag_max = 48) %>% autoplot()
+```
+
+## Exercises
+
+Use the help function to explore what the series gafa_stock, PBS, vic_elec and pelt represent.
+
+Use autoplot() to plot some of the series in these data sets.
+What is the time interval of each series?
+Use filter() to find what days corresponded to the peak closing price for each of the four stocks in gafa_stock.
+
+```{r}
+tsibbledata::gafa_stock
+```
+
+```{r}
+tsibbledata::gafa_stock %>%
+  as_tibble() %>%
+  distinct(Symbol)
+```
+
+```{r}
+tsibbledata::gafa_stock %>%
+  autoplot()
+```
+
+```{r}
+tsibbledata::gafa_stock %>%
+  as_tibble() %>%
+  group_by(Symbol) %>%
+  filter(Close == max(Close, na.rm = TRUE)) %>%
+  select(Symbol, Date, Close)
+```
+
+```{r}
+tsibbledata::pelt %>%
+  autoplot()
+```
+
+### e3
+
+Create time plots of the following time series: fma::bicoal, fma::chicken, fma::dole, USAccDeaths, fma::writing, fma::fancy.
+
+Use ? (or help()) to find out about the data in each series.
+You will need to convert each series to a tsibble using as_tsibble().
+
+--
+
+These are
+
+```{r}
+fma::bicoal %>%
+  class
+```
+
+```{r}
+?fma::bicoal
+
+fma::bicoal %>%
+  as_tsibble() %>%
+  autoplot()
+```
+
+```{r}
+?fma::chicken
+
+fma::chicken %>%
+  as_tsibble() %>%
+  autoplot()
+```
+
+```{r}
+?fma::dole
+
+fma::dole %>%
+  as_tsibble() %>% 
+  autoplot()
+
+fma::dole %>%
+  as_tsibble() %>% 
+  gg_season() + 
+  scale_y_log10()
+```
+
+```{r}
+?fma::writing
+
+fma::writing %>%
+  as_tsibble() %>%
+  autoplot()
+
+fma::writing %>%
+  as_tsibble() %>%
+  gg_season()
+
+fma::writing %>%
+  as_tsibble() %>%
+  gg_subseries()
+```
+
+```{r}
+?fma::fancy
+
+fma::fancy %>%
+  as_tsibble() %>%
+  autoplot()
+
+fma::fancy %>%
+  as_tsibble() %>%
+  gg_season()
+
+fma::fancy %>%
+  as_tsibble() %>%
+  gg_subseries()
+```
+
+```{r}
+a10 %>%
+  gg_subseries()
+```
+
+
+### e5
+
+Use the following graphics functions: autoplot(), gg_season(), gg_subseries(), gg_lag(), ACF() and explore features from the following time series: fma::hsales, USAccDeaths, bricks from aus_production, fpp2::sunspotarea, fpp2::gasoline.
+
+Can you spot any seasonality, cyclicity and trend?
+What do you learn about the series?
+
+--
+
+In the subseries plot, we see the yearly cyclical pattern across months.
+
+```{r}
+fma::hsales %>%
+  as_tsibble() %>%
+  autoplot()
+
+fma::hsales %>%
+  as_tsibble() %>%
+  gg_season()
+
+fma::hsales %>%
+  as_tsibble() %>%
+  gg_subseries()
+
+fma::hsales %>%
+  as_tsibble() %>%
+  gg_lag()
+
+fma::hsales %>%
+  as_tsibble() %>%
+  ACF()
+```
+
+```{r}
+fpp2::sunspotarea %>%
+  as_tsibble() %>%
+  autoplot()
+```
+
+There seems to be a cyclic trend, but not on a seasonal period. 
+We can study the lag, the correlation with previous values over time.
+
+We see that that there are negative correlations on a 5-year period,
+and positive correlations on a 10-year period. 
+Moveover, this cycle continues!
+
+```{r}
+fpp2::sunspotarea %>%
+  as_tsibble() %>%
+  gg_lag()
+
+fpp2::sunspotarea %>%
+  as_tsibble() %>%
+  ACF() %>%
+  autoplot()
+```
+
+
+```{r}
+fpp2::gasoline %>%
+  as_tsibble() %>%
+  autoplot()
+```
+
+```{r}
+fpp2::gasoline %>%
+  as_tsibble() %>%
+  gg_season() +
+  geom_smooth(aes(group = NULL), se = FALSE)
+```
+
+
+```{r}
+tsibbledata::aus_production %>%
+  autoplot(Bricks)
+```
+
+```{r}
+tsibbledata::aus_production %>%
+  gg_season()
+```
+
+```{r}
+tsibbledata::aus_production %>%
+  gg_lag() 
+```
+
+### e7
+
+```{r}
+tsibbledata::pelt %>%
+  ACF() %>%
+  autoplot()
+```
+
+
+### e8
+
+```{r}
+tsibbledata::aus_livestock %>%
+  as_tibble() %>%
+  distinct(State)
+
+tsibbledata::aus_livestock %>%
+  as_tibble() %>%
+  distinct(Animal)
+```
+
+```{r}
+vic_pigs <- tsibbledata::aus_livestock %>%
+  filter(State == 'Victoria', Animal == "Pigs") %>%
+  filter_index("1990" ~ "1995")
+
+vic_pigs %>%
+  autoplot()
+```
+
+```{r}
+vic_pigs %>%
+  ACF() %>%
+  autoplot()
+```
+
+### e9
+
+```{r}
+tsibbledata::gafa_stock %>%
+  as_tibble() %>%
+  distinct(Symbol)
+```
+
+```{r}
+goog_diff <- tsibbledata::gafa_stock %>%
+  filter(Symbol == 'GOOG') %>%
+  mutate(diff = difference(Close))
+goog_diff %>%
+  autoplot(diff)
+```
+
+```{r}
+goog_diff %>%
+  ACF(diff) %>%
+  autoplot()
+```
+

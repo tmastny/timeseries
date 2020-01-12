@@ -1,0 +1,427 @@
+---
+title: "fable-chapter-3"
+output: rmarkdown::html_vignette
+vignette: >
+  %\VignetteIndexEntry{fable-chapter-3}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r, include = FALSE}
+knitr::opts_chunk$set(
+  collapse = TRUE,
+  comment = "#>"
+)
+```
+
+```{r}
+library(tsibble)
+library(dplyr)
+library(fable)
+library(tsibbledata)
+library(ggplot2)
+library(lubridate)
+library(feasts)
+```
+
+## 3.1
+
+```{r}
+tsibbledata::global_economy %>%
+  filter(Country == 'Sweden') %>%
+  autoplot(GDP)
+```
+
+
+```{r}
+fit <- global_economy %>%
+  model(trend_model = TSLM(GDP ~ trend()))
+
+fit
+```
+
+```{r}
+fit %>%
+  forecast(h = "3 years")
+```
+
+```{r}
+fit %>%
+  forecast(h = "3 years") %>%
+  filter(Country == 'Sweden') %>%
+  autoplot(global_economy)
+```
+
+
+## 3.2
+
+```{r}
+bricks <- aus_production %>%
+  filter_index(1970 ~ 2004)
+
+bricks
+```
+
+Total Average model
+
+```{r}
+bricks %>%
+  model(MEAN(Bricks)) %>%
+  forecast(h = "5 years") %>%
+  autoplot(bricks)
+```
+
+Naive: last value
+
+```{r}
+bricks %>%
+  model(NAIVE(Bricks)) %>%
+  forecast(h = "5 years") %>%
+  autoplot(bricks)
+```
+
+```{r}
+bricks %>%
+  model(SNAIVE(Bricks ~ lag("year"))) %>%
+  forecast(h = "5 years") %>%
+  autoplot(bricks)
+```
+
+Drift
+
+```{r}
+bricks %>%
+  model(RW(Bricks ~ drift())) %>%
+  forecast(h = "5 years") %>%
+  autoplot(bricks)
+```
+
+```{r}
+# Set training data from 1992 to 2006
+train <- aus_production %>% filter_index("1992 Q1" ~ "2006 Q4")
+
+# Fit the models
+beer_fit <- train %>%
+  model(
+    Mean = MEAN(Beer),
+    `Naïve` = NAIVE(Beer),
+    `Seasonal naïve` = SNAIVE(Beer)
+  )
+
+# Generate forecasts for 14 quarters
+beer_fc <- beer_fit %>% forecast(h = 14)
+
+# Plot forecasts against actual values
+beer_fc %>%
+  autoplot(train, level = NULL) +
+    autolayer(filter_index(aus_production, "2007 Q1" ~ .), color = "black") +
+    ggtitle("Forecasts for quarterly beer production") +
+    xlab("Year") + ylab("Megalitres") +
+    guides(colour=guide_legend(title="Forecast"))
+```
+
+```{r}
+# Re-index based on trading days
+google_2015 <- gafa_stock %>%
+  filter(Symbol == "GOOG") %>%
+  mutate(day = row_number()) %>%
+  update_tsibble(index = day, regular = TRUE)
+```
+
+
+```{r}
+# Filter the year of interest
+google_2015 <- google_stock %>% filter(year(Date) == 2015)
+
+# Fit the models
+google_fit <- google_2015 %>%
+  model(
+    Mean = MEAN(Close),
+    `Naïve` = NAIVE(Close),
+    Drift = NAIVE(Close ~ drift())
+  )
+
+# Produce forecasts for the 19 trading days in January 2015
+google_fc <- google_fit %>% forecast(h = 19)
+
+# A better way using a tsibble to determine the forecast horizons
+google_jan_2016 <- google_stock %>%
+  filter(yearmonth(Date) == yearmonth("2016 Jan"))
+
+google_fc <- google_fit %>% forecast(google_jan_2016)
+
+# Plot the forecasts
+google_fc %>%
+  autoplot(google_2015, level = NULL) +
+    autolayer(google_jan_2016, Close, color='black') +
+    ggtitle("Google stock (daily ending 31 Dec 2015)") +
+    xlab("Day") + ylab("Closing Price (US$)") +
+    guides(colour=guide_legend(title="Forecast"))
+```
+
+## 3.3
+
+```{r}
+global_economy %>%
+  filter(Country == "Australia") %>%
+  autoplot(GDP / Population)
+```
+
+```{r}
+print_retail <- aus_retail %>%
+  filter(Industry == "Newspaper and book retailing") %>%
+  group_by(Industry) %>%
+  index_by(Year = year(Month)) %>%
+  summarise(Turnover = sum(Turnover))
+```
+
+```{r}
+aus_economy <- global_economy %>%
+  filter(Code == "AUS")
+
+adj_turnover <- print_retail %>%
+  left_join(aus_economy, by = "Year") %>%
+  mutate(Adjusted_turnover = Turnover / CPI)
+
+adj_turnover %>%
+  tidyr::gather("Type", "Turnover", Turnover, Adjusted_turnover, factor_key = TRUE) %>%
+  ggplot(aes(x = Year, y = Turnover)) +
+    geom_line() +
+    facet_grid(vars(Type), scales = "free_y") +
+    xlab("Years") + ylab(NULL) +
+    ggtitle("Turnover for the Australian print media industry")
+```
+
+## 3.4
+
+For example: subtracting out seasonal trends (fitting a model on the months)
+and seeing an increase in the residuals.
+
+```{r}
+augment(beer_fit)
+```
+
+## 3.5
+
+```{r}
+google_2015 %>%
+  model(NAIVE(Close)) %>%
+  forecast(h = 10) %>%
+  hilo()
+```
+
+```{r}
+google_2015 %>%
+  model(NAIVE(Close)) %>%
+  forecast(h = 10) %>%
+  autoplot(google_2015)
+```
+
+## Exercises
+
+For the following series, find an appropriate Box-Cox transformation in order to stabilise the variance.
+
+United States GDP from global_economy
+Slaughter of Victorian “Bulls, bullocks and steers” in aus_livestock
+Gas production from aus_production
+
+```{r}
+global_economy %>%
+  filter(Country == 'United States') %>% 
+  autoplot(GDP)
+```
+
+```{r}
+global_economy %>%
+  filter(Country == 'United States') %>%
+  features(GDP, features = guerrero) %>%
+  pull(lambda_guerrero)
+
+global_economy %>%
+  filter(Country == 'United States') %>% 
+  autoplot(box_cox(GDP, 2))
+```
+
+```{r}
+aus_livestock %>%
+  filter(Animal == 'Bulls, bullocks and steers', State == 'Victoria') %>%
+  autoplot()
+```
+
+```{r}
+aus_livestock %>%
+  filter(Animal == 'Bulls, bullocks and steers', State == 'Victoria') %>%
+  features(features = guerrero) %>%
+  pull(lambda_guerrero)
+
+aus_livestock %>%
+  filter(Animal == 'Bulls, bullocks and steers', State == 'Victoria') %>% 
+  autoplot(box_cox(Count, 2))
+```
+
+```{r}
+aus_production %>%
+  autoplot(box_cox(Gas, 0.2))
+```
+
+### e3
+
+```{r}
+expsmooth::cangas %>%
+  as_tsibble() %>%
+  autoplot()
+```
+
+```{r}
+expsmooth::cangas %>%
+  as_tsibble() %>%
+  features(value, features = guerrero) %>%
+  pull(lambda_guerrero)
+
+expsmooth::cangas %>%
+  as_tsibble() %>%
+  autoplot(box_cox(value, .4))
+```
+
+```{r}
+expsmooth::cangas %>%
+  as_tsibble() %>%
+  gg_season()
+```
+
+The season patterns change (more frequent turns as the years increase).
+
+### e4
+
+```{r}
+aus_production %>%
+  autoplot(Tobacco)
+```
+
+```{r}
+ansett %>%
+  filter(Class == 'Economy') %>%
+  as_tibble() %>%
+  distinct(Airports)
+```
+
+
+```{r}
+ansett %>%
+  filter(Class == 'Economy', Airports == 'MEL-SYD') %>%
+  autoplot()
+```
+
+Demand / population (don't have data)
+Demand / temperature
+
+```{r}
+vic_elec
+```
+
+```{r}
+vic_elec %>%
+  autoplot(Demand) + 
+  scale_y_log10()
+```
+
+
+```{r}
+vic_elec %>%
+  autoplot(Demand / Temperature) +
+  scale_y_log10()
+```
+
+### e5
+
+```{r}
+global_economy %>%
+  filter(Country == 'Australia') %>%
+  model(
+    NAIVE(Population),
+    SNAIVE(Population),
+    RW(Population ~ drift())
+  ) %>%
+  forecast(h = "5 years") %>%
+  autoplot(global_economy %>%
+  filter(Country == 'Australia'))
+```
+
+```{r}
+## SNAIVE
+aus_production %>%
+  autoplot(Bricks)
+```
+
+```{r}
+brick_fit <- aus_production %>%
+  filter(!is.na(Bricks)) %>%
+  model(
+    Mean = MEAN(Bricks),
+    `Naïve` = NAIVE(Bricks),
+    `Seasonal naïve` = SNAIVE(Bricks)
+  )
+
+# Generate forecasts for 14 quarters
+brick_fc <- brick_fit %>% forecast(h=14)
+
+# Plot forecasts against actual values
+brick_fc %>%
+  autoplot(aus_production %>% filter(!is.na(Bricks))) 
+```
+
+```{r}
+aus_livestock %>% as_tibble() %>% distinct(Animal)
+```
+
+```{r}
+aus_livestock %>% 
+  filter(Animal == 'Lambs', State == 'New South Wales') %>%
+  autoplot()
+```
+
+### e6
+
+```{r}
+gafa_stock %>% as_tibble() %>% distinct(Symbol)
+```
+
+```{r}
+filter(gafa_stock, Symbol == 'FB') %>%
+  autoplot()
+```
+
+```{r}
+fb_stock <- filter(gafa_stock, Symbol == 'FB') %>%
+  mutate(day = row_number()) %>%
+  update_tsibble(index = day, regular = TRUE)
+  
+fb_stock %>%
+  model(
+    Mean = MEAN(Open),
+    `Naïve` = NAIVE(Open),
+    drift = RW(Open ~ drift())
+  ) %>%
+  forecast(h = 100) %>%
+  autoplot(fb_stock)
+```
+
+
+
+### e7
+
+```{r}
+fit <- aus_livestock %>%
+  filter(State == 'Victoria') %>%
+  model(SNAIVE(Count ~ lag("year"))) 
+
+fit %>%
+  forecast(h = "3 years") %>%
+  autoplot(aus_livestock %>%
+  filter(State == 'Victoria'))
+```
+
+Calves seem the best fit. Seems like a reasonable benchmark, since they seem
+pretty stable (low drift).
+
+

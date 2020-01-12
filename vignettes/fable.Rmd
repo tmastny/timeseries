@@ -1,0 +1,51 @@
+---
+title: "fable"
+output: rmarkdown::html_vignette
+vignette: >
+  %\VignetteIndexEntry{fable}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r, include = FALSE}
+knitr::opts_chunk$set(
+  collapse = TRUE,
+  comment = "#>"
+)
+```
+
+## Fable
+
+```{r}
+library(fable)
+library(tsibble)
+library(dplyr)
+```
+
+```{r}
+tsibble::tourism
+
+tourism_mel <- tsibble::tourism %>%
+  filter(Region == "Melbourne")
+
+tourism_mel %>% 
+  group_by(Purpose) %>%
+  slice(1)
+```
+
+```{r}
+tourism_mel %>%
+  autoplot()
+```
+
+```{r}
+fit <- tourism_mel %>%
+  model(
+    ets = ETS(Trips ~ trend("A")),
+    arima = ARIMA(Trips)
+  )
+
+fit
+```
+
+
