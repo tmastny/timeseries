@@ -1,0 +1,504 @@
+---
+title: "fable-chapter-4"
+output: rmarkdown::html_vignette
+vignette: >
+  %\VignetteIndexEntry{fable-chapter-4}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r, include = FALSE}
+knitr::opts_chunk$set(
+  collapse = TRUE,
+  comment = "#>"
+)
+```
+
+```{r}
+library(tsibble)
+library(dplyr)
+library(fable)
+library(tsibbledata)
+library(ggplot2)
+library(lubridate)
+library(feasts)
+```
+
+## 4.1
+
+from 3.2:
+
+```{r}
+google_2015 <- gafa_stock %>%
+  filter(Symbol == "GOOG") %>%
+  mutate(day = row_number()) %>%
+  update_tsibble(index = day, regular = TRUE) %>%
+  filter(year(Date) == 2015)
+```
+
+```{r}
+google_2015 %>%
+  autoplot(Close)
+```
+
+```{r}
+aug <- google_2015 %>% model(NAIVE(Close)) %>% augment
+aug
+```
+
+```{r}
+aug %>%
+  autoplot(.resid)
+```
+
+```{r}
+aug %>%
+  ggplot(aes(.resid)) +
+  geom_histogram()
+```
+
+```{r}
+aug %>% ACF(.resid) %>% autoplot()
+```
+
+Shortcut:
+
+```{r}
+google_2015 %>% model(NAIVE(Close)) %>% gg_tsresiduals()
+```
+
+```{r}
+aug %>% features(.resid, box_pierce, lag=10, dof=0)
+```
+
+```{r}
+aug %>% features(.resid, ljung_box, lag=10, dof=0)
+```
+
+## 4.2
+
+```{r}
+recent_production <- aus_production %>% filter(year(Quarter) >= 1992)
+beer_train <- recent_production %>% filter(year(Quarter) <= 2007)
+```
+
+
+```{r}
+beer_fit <- beer_train %>%
+  model(
+    Mean = MEAN(Beer),
+    `Naïve` = NAIVE(Beer),
+    `Seasonal naïve` = SNAIVE(Beer),
+    Drift = RW(Beer ~ drift())
+  )
+
+beer_fc <- beer_fit %>%
+  forecast(h = 10)
+
+beer_fc %>%
+  autoplot(filter(aus_production, year(Quarter) >= 1992), level = NULL) +
+  xlab("Year") + ylab("Megalitres") +
+  ggtitle("Forecasts for quarterly beer production") +
+  guides(colour=guide_legend(title="Forecast"))
+```
+
+```{r}
+accuracy(beer_fc, recent_production)
+```
+
+```{r}
+google_fit <- google_2015 %>%
+  model(
+    Mean = MEAN(Close),
+    `Naïve` = NAIVE(Close),
+    Drift = RW(Close ~ drift())
+  )
+```
+
+
+```{r}
+google_jan_2016 <- gafa_stock %>%
+  filter(Symbol == "GOOG") %>%
+  mutate(day = row_number()) %>%
+  update_tsibble(index = day, regular = TRUE) %>%
+  filter(yearmonth(Date) == yearmonth("2016 Jan"))
+
+google_fc <- google_fit %>%
+  forecast(google_jan_2016)
+
+google_fc %>%
+  autoplot(rbind(google_2015,google_jan_2016), level = NULL) +
+  xlab("Day") + ylab("Closing Price (US$)") +
+  ggtitle("Google stock price (daily ending 6 Dec 13)") +
+  guides(colour=guide_legend(title="Forecast"))
+```
+
+```{r}
+accuracy(google_fc, google_jan_2016)
+```
+
+## 4.3
+
+```{r}
+# Time series cross-validation accuracy
+google_2015_tr <- google_2015 %>%
+  slice(1:(n()-1)) %>%
+  stretch_tsibble(.init = 3, .step = 1)
+
+# Stretch creates a new tsibble, with multiple time series added
+# based on the new `.id` column. 
+#
+# The `.id` column forms a new set of time-series for cross-validation
+```
+
+
+```{r}
+fc <- google_2015_tr %>%
+  model(RW(Close ~ drift())) %>%
+  forecast(h=1)
+
+fc %>% accuracy(google_2015)
+```
+
+```{r}
+# Residual accuracy
+google_2015 %>% model(RW(Close ~ drift())) %>% accuracy()
+```
+
+```{r}
+google_2015_tr <- google_2015 %>%
+  slice(1:(n()-8)) %>%
+  stretch_tsibble(.init = 3, .step = 1)
+```
+
+
+```{r}
+fc <- google_2015_tr %>%
+  model(RW(Close ~ drift())) %>%
+  forecast(h=8) %>%
+  group_by(.id) %>%
+  mutate(h = row_number()) %>%
+  ungroup()
+
+fc %>%
+  accuracy(google_2015, by = "h") %>%
+  ggplot(aes(x = h, y = RMSE)) + geom_point()
+```
+
+## 4.4 exercises
+
+### e1
+
+Calculate the residuals from a seasonal naïve forecast applied to the quarterly Australian beer production data from 1992. The following code will help.
+
+```{r}
+# Extract data of interest
+recent_production <- aus_production %>%
+  filter(year(Quarter) >= 1992)
+
+# Define and estimate a model
+fit <- recent_production %>% model(SNAIVE(Beer))
+
+# Look at the residuals
+fit %>% gg_tsresiduals()
+```
+
+```{r}
+# Look a some forecasts
+fit %>% forecast() %>% autoplot(recent_production)
+```
+
+```{r}
+augment(fit) %>%
+  as_tibble() %>%
+  summarise(mean(.resid, na.rm = TRUE))
+```
+
+```{r}
+fit %>%
+  accuracy()
+```
+
+### e2
+
+```{r}
+aus_prod <- global_economy %>% 
+  filter(Country == 'Australia') 
+
+aus_prod %>%
+  autoplot(Exports)
+```
+
+Trend is growing so I will use drift:
+
+```{r}
+aus_fit <- aus_prod %>%
+  model(
+    RW(Exports ~ drift()),
+    NAIVE(Exports)
+  )
+
+aus_fit %>% forecast() %>% autoplot(aus_prod)
+```
+
+```{r}
+accuracy(aus_fit)
+```
+
+```{r}
+aus_production %>%
+  autoplot(Bricks)
+```
+
+```{r}
+brick_fit <- aus_production %>%
+  filter(!is.na(Bricks)) %>%
+  model(
+    SNAIVE(Bricks),
+    NAIVE(Bricks)
+  )
+
+brick_fit %>%
+  accuracy()
+```
+
+
+```{r}
+brick_fit %>%
+  forecast() %>%
+  autoplot(aus_production)
+```
+
+### e3
+
+#### a
+
+Not necessarily. It should be compared using evaluation metrics.
+
+Normally distributed residuals help the confidence interval of predictions.
+
+#### b
+
+The residual error doesn't necessarily imply the good forecasting error. 
+The model could be overfitting the training data, 
+giving low residual error but no ability to generalize to future observations.
+
+This is why cross-validation helps, by withholding training data to use in 
+evaluation.
+
+#### c
+
+MAPE is not considered the best, because percentages can skew along various dimenions.
+
+#### d
+
+Depends. If it doesn't forecast well, but the residual error is low,
+then the model might be overfitting and more "complicated" (as in able to
+account for more variation) could make things worse. 
+In this case, you need to introduce regularization.
+
+If the residuals are correlated or don't have a mean of zero, 
+then there is information in the data that the model isn't capturing.
+So by making the model more "complicated" to account for this information
+may help with forecasting.
+
+#### e
+
+You should definitely consider that model.
+
+### e4
+
+```{r}
+retail <- readr::read_csv("https://otexts.com/fpp3/extrafiles/tute1.csv") %>%
+  mutate(Quarter = yearmonth(Quarter)) %>%
+  select(Quarter, Sales) %>%
+  as_tsibble(index = Quarter)
+```
+
+```{r}
+retail_train <- retail %>%
+  filter(Quarter <= yearmonth("2010 Dec"))
+```
+
+
+```{r}
+fit_retail <- retail_train %>%
+  model(SNAIVE())
+
+fit_retail %>%
+  accuracy()
+```
+
+
+```{r}
+fit_retail %>%
+  forecast() %>%
+  autoplot(retail)
+```
+
+```{r}
+fit_retail %>%
+  forecast() %>%
+  accuracy(retail)
+```
+
+
+```{r}
+fit_retail %>%
+  gg_tsresiduals()
+```
+
+### e5
+
+```{r}
+tourism %>%
+  filter(Region == 'Gold Coast') %>%
+  as_tibble() %>%
+  distinct(State, Purpose)
+```
+
+```{r}
+gc_tourism <- tourism %>%
+  filter(Region == 'Gold Coast') %>%
+  summarise(Trips = sum(Trips))
+
+gc_tourism %>%
+  autoplot()
+```
+
+```{r}
+gc_tourism_1
+
+# option 1
+gc_tourism %>%
+  slice((n() - 4) : 1)
+
+gc_train_1 <- gc_tourism %>%
+  filter_index(~ "2016 Q4")
+
+gc_fc_1 <- gc_train_1 %>%
+  model(SNAIVE())
+
+gc_train_2 <- gc_tourism %>%
+  filter_index(~ "2015 Q4")
+
+gc_fc_2 <- gc_train_2 %>%
+  model(SNAIVE())
+
+gc_train_3 <- gc_tourism %>%
+  filter_index(~ "2014 Q4")
+
+gc_fc_3 <- gc_train_3 %>%
+  model(SNAIVE())
+```
+
+```{r}
+gc_fc_1 %>%
+  forecast(h = 4) %>%
+  autoplot(gc_tourism)
+```
+
+```{r}
+gc_fc_2 %>%
+  forecast(h = 8) %>%
+  autoplot(gc_tourism)
+```
+
+```{r}
+gc_fc_3 %>%
+  forecast(h = 12) %>%
+  autoplot(gc_tourism)
+```
+
+
+```{r}
+gc_fc_1 %>%
+  forecast(h = 4) %>%
+  mutate(year = year(Quarter)) %>%
+  accuracy(gc_tourism, by = "year")
+```
+
+```{r}
+gc_fc_2 %>%
+  forecast(h = 8) %>%
+  mutate(year = year(Quarter)) %>%
+  accuracy(gc_tourism, by = "year")
+```
+
+```{r}
+gc_fc_3 %>%
+  forecast(h = 12) %>%
+  mutate(year = year(Quarter)) %>%
+  accuracy(gc_tourism, by = "year")
+```
+
+
+### e6
+
+```{r}
+pigs <- aus_livestock %>%
+  filter(
+    State == 'New South Wales',
+    Animal == 'Pigs'
+  )
+
+pigs %>%
+  autoplot()
+```
+
+```{r}
+pigs %>%
+  gg_tsdisplay()
+```
+
+```{r}
+pigs %>%
+  slice(1:(n() - 72))
+
+pigs_train <- pigs %>%
+  filter_index(~ "2012 Dec")
+```
+
+```{r}
+pigs_fit <- pigs_train %>%
+  model(
+    SNAIVE(),
+    NAIVE(),
+    RW(Count ~ drift())
+  )
+```
+
+```{r}
+pigs_fit %>%
+  forecast(h = 72) %>%
+  accuracy(pigs) %>%
+  select(-Animal, -State) %>%
+  arrange(RMSE)
+```
+
+```{r}
+pigs_fit %>%
+  forecast(h = 72) %>%
+  autoplot(pigs)
+```
+
+```{r}
+pigs_fit %>%
+  select(Animal, State, `NAIVE()`) %>%
+  gg_tsresiduals()
+```
+
+### e7
+
+```{r}
+?fma::hsales
+hsales <- fma::hsales %>%
+  as_tsibble()
+```
+
+```{r}
+hsales %>%
+  gg_tsdisplay()
+```
+
+

@@ -122,7 +122,7 @@ beer_fc %>%
 
 ```{r}
 # Re-index based on trading days
-google_2015 <- gafa_stock %>%
+google_stock <- gafa_stock %>%
   filter(Symbol == "GOOG") %>%
   mutate(day = row_number()) %>%
   update_tsibble(index = day, regular = TRUE)
