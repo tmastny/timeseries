@@ -1,0 +1,744 @@
+---
+title: "fable-chapter-6"
+output: rmarkdown::html_vignette
+vignette: >
+  %\VignetteIndexEntry{fable-chapter-6}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r, include = FALSE}
+knitr::opts_chunk$set(
+  collapse = TRUE,
+  comment = "#>"
+)
+```
+
+```{r}
+library(tsibble)
+library(dplyr)
+library(fable)
+library(tsibbledata)
+library(ggplot2)
+library(lubridate)
+library(feasts)
+```
+
+## 6.1
+
+```{r}
+fpp3::us_change
+```
+
+
+```{r}
+fpp3::us_change %>%
+  ggplot(aes(x = Quarter)) +
+  geom_line(aes(y = Consumption, colour = "Consumption")) +
+  geom_line(aes(y = Income, colour = "Income")) +
+  ylab("% change") + xlab("Year") +
+  guides(colour=guide_legend(title="series"))
+```
+
+```{r}
+fpp3::us_change %>%
+  ggplot(aes(Income, Consumption)) +
+  geom_point() +
+  geom_smooth(method = 'lm')
+```
+
+```{r}
+fpp3::us_change %>%
+  model(TSLM(Consumption ~ Income)) %>%
+  report()
+```
+
+## 6.2
+
+```{r}
+fit.consMR <- fpp3::us_change %>%
+  model(
+    tslm = TSLM(Consumption ~ Income + Production + Unemployment + Savings)
+  )
+
+report(fit.consMR)
+```
+
+```{r}
+augment(fit.consMR)
+```
+
+```{r}
+augment(fit.consMR) %>%
+  ggplot(aes(x = Quarter)) +
+  geom_line(aes(y = Consumption, colour = "Data")) +
+  geom_line(aes(y = .fitted, colour = "Fitted")) +
+  xlab("Year") + ylab(NULL) +
+  ggtitle("Percent change in US consumption expenditure") +
+  guides(colour=guide_legend(title=NULL))
+```
+
+
+```{r}
+augment(fit.consMR) %>%
+  ggplot(aes(x=Consumption, y=.fitted)) +
+  geom_point() +
+  ylab("Fitted (predicted values)") +
+  xlab("Data (actual values)") +
+  ggtitle("Percent change in US consumption expenditure") +
+  geom_abline(intercept=0, slope=1)
+```
+
+## 6.3
+
+```{r}
+fit.consMR %>%
+  gg_tsresiduals()
+```
+
+
+```{r}
+augment(fit.consMR) %>%
+  ggplot(aes(x=.fitted, y=.resid)) +
+  geom_point() +
+  labs(x = "Fitted", y = "Residuals")
+```
+
+## 6.4
+
+```{r}
+aus_production
+```
+
+```{r}
+recent_production <- aus_production %>%
+  filter(year(Quarter) >= 1992)
+
+recent_production %>%
+  autoplot(Beer) +
+  labs(x = "Year", y = "Megalitres")
+```
+
+```{r}
+recent_production %>%
+  gg_tsdisplay(Beer)
+```
+
+```{r}
+fit_beer <- recent_production %>%
+  model(TSLM(Beer ~ trend() + season()))
+
+report(fit_beer)
+```
+
+```{r}
+fit_beer %>%
+  forecast() %>%
+  autoplot(recent_production)
+```
+
+```{r}
+augment(fit_beer)
+```
+
+```{r}
+augment(fit_beer) %>%
+  ggplot(aes(Quarter)) +
+  geom_line(aes(y = Beer, color = "actual")) +
+  geom_line(aes(y = .fitted, color = 'fitted'))
+```
+
+```{r}
+fit_beer %>%
+  gg_tsresiduals()
+```
+
+```{r}
+augment(fit_beer) %>%
+  ggplot(aes(x = Beer, y = .fitted,
+             colour = factor(quarter(Quarter)))) +
+  geom_point() +
+  ylab("Fitted") + xlab("Actual values") +
+  ggtitle("Quarterly beer production") +
+  scale_colour_brewer(palette="Dark2", name="Quarter") +
+  geom_abline(intercept=0, slope=1)
+```
+
+```{r}
+fourier_beer <- recent_production %>%
+  model(TSLM(Beer ~ trend() + fourier(K=2)))
+
+report(fourier_beer)
+```
+
+## 6.5
+
+```{r}
+glance(fit.consMR)
+```
+
+```{r}
+glance(fit.consMR) %>%
+  select(adj_r_squared, CV, AIC, AICc, BIC)
+```
+
+## 6.6
+
+No difference between ex-ante and ex-post forecasts, 
+because the model only depends on trend and seasonality. 
+There are no predictors to forecast, like Consumption example.
+
+```{r}
+recent_production <- aus_production %>% filter(year(Quarter) >= 1992)
+
+fit_beer <- recent_production %>%
+  model(TSLM(Beer ~ trend() + season()))
+
+
+fc_beer <- forecast(fit_beer)
+fc_beer %>%
+  autoplot(recent_production) +
+  ggtitle("Forecasts of beer production using regression") +
+  xlab("Year") + ylab("megalitres")
+```
+
+We can do a ex-ante forecast by adding conversation predictions are variables
+of interest to see how our model behaves.
+
+For example, let say we are working with
+```{r}
+fpp3::us_change
+```
+
+And we want to make forecasts based on these growth patterns for the
+predictors:
+
+```{r}
+up_future <- new_data(fpp3::us_change, 4) %>%
+  mutate(Income = 1, Savings = 0.5, Unemployment = 0)
+
+up_future
+```
+
+```{r}
+down_future <- new_data(fpp3::us_change, 4) %>%
+  mutate(Income = -1, Savings = -0.5, Unemployment = 0)
+
+down_future
+```
+
+Build model:
+
+```{r}
+fit_consBest <- fpp3::us_change %>%
+  model(tslm = TSLM(Consumption ~ Income + Savings + Unemployment))
+
+report(fit_consBest)
+```
+
+```{r}
+fc_up <- forecast(fit_consBest, new_data = up_future) %>%
+  mutate(Scenario = 'Increase') %>%
+  as_fable(response=Consumption, key = Scenario)
+
+fc_up
+```
+
+```{r}
+fc_down <- forecast(fit_consBest, new_data = down_future) %>%
+  mutate(Scenario = 'Decrease') %>%
+  as_fable(response=Consumption, key = Scenario)
+
+fc_down
+```
+
+```{r}
+fpp3::us_change %>%
+  autoplot(Consumption) +
+  autolayer(rbind(fc_up, fc_down)) +
+  ylab("% change in US consumption")
+```
+
+This is still *NOT* ex-post, because we don't have true values for the predictors.
+
+```{r}
+trend_model <- fpp3::us_change %>%
+  model(tslm = TSLM(Consumption ~ trend())) 
+
+forecast(trend_model) %>%
+  autoplot(fpp3::us_change)
+```
+
+## 6.8
+
+Not linear trends, piece-wise linear.
+
+```{r}
+boston_men <- fpp3::boston_marathon %>%
+  filter(Event == "Men's open division") %>%
+  mutate(Minutes = as.numeric(Time)/60)
+
+boston_men
+```
+
+```{r}
+boston_men %>%
+  autoplot(Minutes) +
+  geom_smooth(method = 'lm')
+```
+
+```{r}
+fit_trends <- boston_men %>%
+  model(
+    linear = TSLM(Minutes ~ trend()),
+    exponential = TSLM(log(Minutes) ~ trend()),
+    piecewise = TSLM(Minutes ~ trend(knots = c(1940, 1980)))
+  )
+
+fit_trends %>%
+  select(piecewise) %>%
+  report()
+```
+
+```{r}
+fc_trends <- fit_trends %>% forecast(h=10)
+```
+
+
+```{r}
+boston_men %>%
+  autoplot(Minutes) +
+  geom_line(aes(y=.fitted, colour=.model), data = fitted(fit_trends)) +
+  autolayer(fc_trends, alpha = 0.5, level = 95) +
+  xlab("Year") +  ylab("Winning times in minutes") +
+  ggtitle("Boston Marathon") +
+  guides(colour=guide_legend(title="Model"))
+```
+
+## 6.10 exercises
+
+### 1
+
+```{r}
+jan14_vic_elec <- tsibbledata::vic_elec %>%
+  filter(yearmonth(Time) == yearmonth("2014 Jan")) %>%
+  index_by(Date = as_date(Time)) %>%
+  summarise(Demand = sum(Demand), Temperature = max(Temperature))
+
+jan14_vic_elec
+```
+
+#### a
+
+```{r}
+jan14_vic_elec %>%
+  autoplot()
+```
+
+```{r}
+fit_elec <- jan14_vic_elec %>%
+  model(linear = TSLM(Demand ~ Temperature))
+
+report(fit_elec)
+```
+
+```{r}
+augment(fit_elec) %>%
+  ggplot(aes(Date)) +
+  geom_line(aes(y = Demand, color = "True")) +
+  geom_line(aes(y = .fitted, color = "Fit"))
+```
+
+#### b
+
+```{r}
+fit_elec %>%
+  gg_tsresiduals()
+```
+
+```{r}
+temp_15 <- new_data(jan14_vic_elec, 1) %>%
+  mutate(Temperature = 15)
+temp_15
+```
+
+```{r}
+temp_35 <- new_data(jan14_vic_elec, 1) %>%
+  mutate(Temperature = 35)
+```
+
+```{r}
+fc_15 <- fit_elec %>%
+  forecast(new_data = temp_15) %>%
+  mutate(fc = 'low 15') %>%
+  as_fable(response = Demand, key = fc)
+```
+
+```{r}
+fc_35 <- fit_elec %>%
+  forecast(new_data = temp_35) %>%
+  mutate(fc = 'high 35') %>%
+  as_fable(response = Demand, key = fc)
+```
+
+15 degrees will be below observated value, 
+so the prediced demand will have a larger error.
+
+```{r}
+jan14_vic_elec %>%
+  as_tibble() %>%
+  ggplot(aes(Temperature)) +
+  geom_histogram()
+```
+
+```{r}
+jan14_vic_elec %>%
+  autoplot(Demand) +
+  autolayer(rbind(fc_15, fc_35))
+```
+
+Hilo diff: 202683 - 100585 = 102,098
+
+```{r}
+fc_15 %>%
+  mutate(interval = hilo(.distribution))
+```
+
+Hilo diff: 324070 - 225260 = 98,810
+
+```{r}
+fc_35 %>%
+  mutate(interval = hilo(.distribution))
+```
+
+So the prediction interval for the most likely temperature (35) is small,
+but not by that much. 
+
+#### e
+
+```{r}
+jan14_vic_elec %>%
+  as_tibble() %>%
+  ggplot(aes(Temperature, Demand)) +
+  geom_point() + 
+  geom_smooth(method = 'lm')
+```
+
+### 2
+
+```{r}
+tsibbledata::olympic_running
+```
+
+```{r}
+tsibbledata::olympic_running %>%
+  as_tibble() %>%
+  group_by(Length, Sex) %>%
+  summarise(n = n())
+```
+
+
+```{r}
+tsibbledata::olympic_running %>%
+  filter(Length == '100m') %>%
+  autoplot()
+```
+
+```{r}
+fit_running <- tsibbledata::olympic_running %>%
+  filter(Length == '100m') %>%
+  model(linear = TSLM(Time ~ trend()))
+```
+
+```{r}
+fit_running %>%
+  forecast() %>%
+  autoplot(tsibbledata::olympic_running %>% filter(Length == '100m'))
+```
+
+```{r}
+augment(fit_running) %>%
+  ggplot(aes(Year, .resid, color = Sex)) +
+  geom_point()
+```
+
+```{r}
+fit_events <- tsibbledata::olympic_running %>%
+  model(tslm = TSLM(Time ~ trend()))
+
+fit_events
+```
+
+```{r}
+fit_events %>%
+  forecast(h = 1) %>% 
+  as_tibble() %>%
+  mutate(interval = hilo(.distribution)) %>%
+  select(Length, Sex, Time, interval)
+```
+
+### 4
+
+```{r}
+fancy <- fma::fancy %>%
+  as_tsibble()
+fancy %>%
+  autoplot()
+```
+
+#### a
+
+```{r}
+fancy %>%
+  gg_tsdisplay()
+```
+
+```{r}
+fit_fancy_trend <- fancy %>%
+  model(
+    linear = TSLM(value ~ trend()),
+    log = TSLM(log(value) ~ trend())
+  )
+
+augment(fit_fancy_trend)
+```
+
+```{r}
+accuracy(fit_fancy)
+```
+
+
+```{r}
+augment(fit_fancy_trend) %>%
+  ggplot(aes(index)) +
+  geom_line(aes(y = value, color = "value")) +
+  geom_line(aes(y = .fitted, color = .model))
+```
+
+The residuals of the linear trend are not centered around zero.
+
+```{r}
+fit_fancy_trend %>%
+  select(linear) %>%
+  gg_tsresiduals()
+```
+
+The log trend is centered around zero.
+
+```{r}
+fit_fancy_trend %>%
+  select(log) %>%
+  gg_tsresiduals()
+```
+
+Adding in seasonality, the log fit is much, much better than the linear.
+
+```{r}
+fit_fancy_seasonal <- fancy %>%
+  model(
+    linear = TSLM(value ~ trend() + season()),
+    log = TSLM(log(value) ~ trend() + season())
+  )
+
+accuracy(fit_fancy_seasonal)
+```
+
+```{r}
+fit_fancy_seasonal %>%
+  select(linear) %>%
+  gg_tsresiduals()
+```
+
+```{r}
+fit_fancy_seasonal %>%
+  select(log) %>%
+  gg_tsresiduals()
+```
+
+This explains the major difference between the log and linear model.
+
+As you can see by the red line plot, the linear forecast expects linear growth,
+but that doesn't scale with the increase of sales.
+
+With the `log` fit, the trend or growth is exponential, 
+and the fit finds the right exponential growth coefficient. 
+
+This means it is able to match the increase in volume in later years.
+
+```{r}
+augment(fit_fancy_seasonal) %>%
+  ggplot(aes(index)) +
+  geom_line(aes(y = value, color = "value")) +
+  geom_line(aes(y = .fitted, color = .model))
+```
+
+#### c
+
+```{r}
+surf_fancy <- fancy %>%
+  mutate(surf = as.factor(case_when(
+    month(index) == 3 & year(index) > 1987 ~ "yes", 
+    TRUE ~ "no"
+  )))
+
+surf_fancy
+```
+
+```{r}
+fit_fancy_surf <- surf_fancy %>%
+  model(
+    seasonal = TSLM(log(value) ~ trend() + season()),
+    surf = TSLM(log(value) ~ trend() + season() + surf)
+  )
+
+accuracy(fit_fancy_surf)
+```
+
+```{r}
+fit_fancy_surf %>%
+  select(surf) %>%
+  report()
+```
+
+```{r}
+augment(fit_fancy_surf) %>%
+  ggplot(aes(index)) +
+  geom_line(aes(y = value, color = "value")) +
+  geom_line(aes(y = .fitted, color = .model))
+```
+
+#### d
+
+```{r}
+fit_fancy_surf %>%
+  select(surf) %>%
+  gg_tsresiduals()
+```
+
+```{r}
+augment(fit_fancy_surf) %>%
+  filter(.model == 'surf') %>%
+  ggplot(aes(.fitted, .resid)) +
+  geom_point()
+```
+
+```{r}
+augment(fit_fancy_surf) %>%
+  mutate(month = month(index, label = TRUE)) %>%
+  ggplot(aes(month, .resid, group = month)) +
+  geom_boxplot()
+```
+
+Therefore, the residuals *are* distinguishable from white noise,
+meaning there is signal in the residuals our model is not accounting for.
+
+```{r}
+augment(fit_fancy_surf) %>%
+  features(.resid, ljung_box)
+```
+
+
+```{r}
+augment(fit_fancy_surf) %>%
+  features(.resid, ljung_box, lag = 10, dof = 3)
+```
+
+```{r}
+fit_fancy_surf %>%
+  select(seasonal) %>%
+  forecast(h = 3 * 12) %>%
+  autoplot(fancy)
+```
+
+### 5
+
+```{r}
+us_gas <- fpp3::us_gasoline %>%
+  filter_index(~ "2005")
+
+us_gas
+```
+
+```{r}
+us_gas %>%
+  gg_tsdisplay()
+```
+
+
+```{r}
+fit_gas <- us_gas %>%
+  model(
+    f2 = TSLM(Barrels ~ trend() + fourier(K = 2)),
+    f3 = TSLM(Barrels ~ trend() + fourier(K = 3)),
+    f5 = TSLM(Barrels ~ trend() + fourier(K = 5)),
+    f9 = TSLM(Barrels ~ trend() + fourier(K = 9)),
+    f12 = TSLM(Barrels ~ trend() + fourier(K = 12))
+  )
+
+accuracy(fit_gas)
+```
+
+```{r}
+augment(fit_gas) %>%
+  ggplot(aes(Barrels, .fitted)) +
+  geom_point() +
+  facet_wrap(~.model)
+```
+
+```{r}
+fit_gas %>%
+  select(f12) %>%
+  gg_tsresiduals()
+```
+
+
+#### d
+
+```{r}
+fit_gas %>%
+  select(f2, f12) %>%
+  forecast(h = 52) %>%
+  autoplot(
+    fpp3::us_gasoline %>%
+      filter_index("2005" ~ "2006")
+  )
+```
+
+The more fourier terms, the more wiggly the curve gets.
+
+### 6
+
+```{r}
+huron <- fma::huron %>%
+  as_tsibble()
+
+huron
+```
+
+```{r}
+gg_tsdisplay(huron)
+```
+
+```{r}
+fit_huron <- huron %>%
+  model(
+    linear = TSLM(value ~ trend()),
+    knot = TSLM(value ~ trend(knots = c(1915)))
+  )
+
+accuracy(fit_huron)
+```
+
+```{r}
+augment(fit_huron) %>%
+  ggplot(aes(index)) +
+  geom_line(aes(y = value, color = "value")) +
+  geom_line(aes(y = .fitted, color = .model))
+```
+
+```{r}
+fit_huron %>%
+  forecast(h = 8) %>%
+  autoplot(huron)
+```
+

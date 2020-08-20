@@ -1,0 +1,261 @@
+---
+title: "fable-chapter-7"
+output: rmarkdown::html_vignette
+vignette: >
+  %\VignetteIndexEntry{fable-chapter-7}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r, include = FALSE}
+knitr::opts_chunk$set(
+  collapse = TRUE,
+  comment = "#>"
+)
+```
+
+```{r setup}
+library(tsibble)
+library(dplyr)
+library(fable)
+library(tsibbledata)
+library(ggplot2)
+library(lubridate)
+library(feasts)
+```
+
+## 7.2 
+
+```{r}
+global_economy %>%
+  filter(Country == 'Australia') %>%
+  autoplot(Exports)
+```
+
+```{r}
+aus_exports <- global_economy %>%
+  filter(Country == 'Australia') %>%
+  transmute(
+    Exports = Exports / 100,
+    `5-MA` = slide_dbl(Exports, mean, .size = 5, .align = 'center')
+  )
+
+aus_exports
+```
+
+```{r}
+aus_exports %>%
+  autoplot() +
+  autolayer(aus_exports, `5-MA`, color = 'red') + 
+  geom_smooth()
+```
+
+```{r}
+beer <- aus_production %>%
+  filter_index("1992" ~ .) %>%
+  select(Quarter, Beer)
+```
+
+```{r}
+beer_ma <- beer %>%
+  mutate(
+    `4-MA` = slide_dbl(Beer, mean, .size = 4, .align = "center-left"),
+    `2x4-MA` = slide_dbl(`4-MA`, mean, .size = 2, .align = "center-right")
+  )
+
+beer_ma
+```
+
+```{r}
+beer_ma %>%
+  tidyr::pivot_longer(-Quarter) %>%
+  ggplot(aes(Quarter, value, color = name)) +
+  geom_line()
+```
+
+2x4-MA is useful to average out quarterly seasonal patterns.
+> 2x8-MA and 2x12-MA also work similarly
+
+seasonal period 
+* even and of order `m` -> 2xm -MA
+* odd and of order `m`  -> m-mA
+
+Example:
+* 2x12-MA estimates the trend-cycle of monthly data
+* 7-MA estimates the trend-cycle of daily data with weekly seasonality
+
+```{r}
+us_retail_employment <- fpp3::us_employment %>%
+  filter(year(Month) >= 1990, Title == "Retail Trade")
+
+us_retail_employment
+```
+
+```{r}
+us_retail_employment_ma <- us_retail_employment %>%
+  mutate(
+    `12-MA` = slide_dbl(Employed, mean, .size = 12, .align = "cr"),
+    `2x12-MA` = slide_dbl(`12-MA`, mean, .size = 2, .align = "cl")
+  )
+
+us_retail_employment_ma
+```
+
+```{r}
+us_retail_employment_ma %>%
+  autoplot(Employed, color='gray') +
+  autolayer(us_retail_employment_ma, vars(`12-MA`), color='blue') +
+  autolayer(us_retail_employment_ma, vars(`2x12-MA`), color='red') +
+  xlab("Year") + ylab("Persons (thousands)") +
+  ggtitle("Total employment in US retail")
+```
+
+### 7.3
+
+```{r}
+us_retail_employment %>%
+  model(classical_decomposition(Employed, type = "additive")) %>%
+  components()
+```
+
+
+```{r}
+us_retail_employment %>%
+  model(classical_decomposition(Employed, type = "additive")) %>%
+  components() %>%
+  autoplot()
+```
+
+
+## 7.4
+
+```{r}
+us_retail_employment
+```
+
+```{r}
+x11_dcmp <- us_retail_employment %>%
+  model(feasts:::X11(Employed, type = "additive")) %>%
+  components()
+
+autoplot(x11_dcmp) + xlab("Year") +
+  ggtitle("Multiplicative X11 decomposition of US retail employment in the US")
+```
+
+```{r}
+x11_dcmp %>%
+  ggplot(aes(x = Month)) +
+  geom_line(aes(y = Employed, colour = "Data")) +
+  geom_line(aes(y = season_adjust, colour = "Seasonally Adjusted")) +
+  geom_line(aes(y = trend, colour = "Trend")) +
+  xlab("Year") + ylab("Persons (thousands)") +
+  ggtitle("Total employment in US retail") +
+  scale_colour_manual(values=c("gray","blue","red"),
+             breaks=c("Data","Seasonally Adjusted","Trend"))
+```
+
+```{r}
+x11_dcmp %>%
+  gg_season(seasonal)
+```
+
+
+```{r}
+x11_dcmp %>%
+  gg_subseries(seasonal)
+```
+
+## 7.5
+
+
+```{r}
+seats_dcmp <- us_retail_employment %>%
+  model(feasts:::SEATS(Employed)) %>%
+  components()
+
+seats_dcmp
+```
+
+```{r}
+autoplot(seats_dcmp) + xlab("Year") +
+  ggtitle("SEATS decomposition of total US retail employment")
+```
+
+```{r}
+seats_dcmp %>%
+  gg_subseries(seasonal)
+```
+
+## 7.6
+
+Note the varying seasonality.
+
+```{r}
+us_retail_employment %>%
+  model(STL(Employed ~ trend(window=7), robust = TRUE)) %>%
+  components() %>%
+  autoplot()
+```
+
+Changing seasonal window.
+
+```{r}
+us_retail_employment %>%
+  model(STL(
+    Employed ~ trend(window=7) + season(window = 'periodic'), robust = TRUE
+  )) %>%
+  components() %>%
+  autoplot()
+```
+
+## 7.7
+
+```{r}
+us_retail_employment %>%
+  features(Employed, feature_set(tags = "stl")) %>%
+  mutate_all(as.character) %>%
+  tidyr::pivot_longer(everything())
+```
+
+## 7.8
+
+```{r}
+dcmp <- us_retail_employment %>%
+  model(STL(Employed ~ trend(window = 7), robust=TRUE)) %>%
+  components() %>%
+  select(-.model)
+
+dcmp
+```
+
+
+```{r}
+dcmp %>%
+  model(NAIVE(season_adjust)) %>%
+  forecast() %>%
+  autoplot(dcmp) + ylab("New orders index") +
+  ggtitle("Naive forecasts of seasonally adjusted data")
+```
+
+```{r}
+us_retail_employment %>%
+  model(stlf = decomposition_model(
+             STL(Employed ~ trend(window = 7), robust = TRUE),
+             NAIVE(season_adjust)
+  )) %>%
+  report
+```
+
+
+```{r}
+us_retail_employment %>%
+  model(stlf = decomposition_model(
+             STL(Employed ~ trend(window = 7), robust = TRUE),
+             NAIVE(season_adjust)
+  )) %>%
+  forecast() %>%
+  autoplot(us_retail_employment)
+```
+
+## 7.9 Exercises
+

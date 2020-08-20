@@ -1,0 +1,280 @@
+---
+title: "acf-pcf"
+output: rmarkdown::html_vignette
+vignette: >
+  %\VignetteIndexEntry{acf-pcf}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r, include = FALSE}
+knitr::opts_chunk$set(
+  collapse = TRUE,
+  comment = "#>"
+)
+```
+
+```{r setup}
+library(tsibble)
+library(dplyr)
+library(fable)
+library(tsibbledata)
+library(ggplot2)
+library(lubridate)
+library(feasts)
+library(tidyr)
+```
+
+## chapter 9 refresher
+
+### stationary
+```{r}
+google_2015 <- gafa_stock %>%
+  filter(Symbol == "GOOG") %>%
+  mutate(day = row_number()) %>%
+  update_tsibble(index = day, regular = TRUE) %>%
+  filter(year(Date) == 2015)
+```
+
+```{r}
+google_2015 %>%
+  gg_tsdisplay()
+```
+
+
+ARIMA needs to work on stationary data
+
+*stationary*
+- no trends or seasonality
+- cyclic behavior okay
+- white noise is an example, but so is lynx
+
+
+
+### differences `d` parameter
+d parameter: number of differences until data is stationary
+
+Test if stationary
+```{r}
+google_2015 %>%
+  mutate(diff_close = difference(Close)) %>%
+  features(diff_close, ljung_box, lag = 10)
+```
+
+Find number of differences:
+```{r}
+google_2015 %>%
+  features(Close, unitroot_ndiffs)
+```
+
+
+### autogressive `p` parameter
+
+Autoregressive parameter `p`
+
+
+### moving average `q` parameter
+
+moving average `q` parameter
+
+
+
+
+
+### ARIMA
+
+`pdq`
+
+ARIMA(0, 0, 0)     ~ white noise
+ARIMA(0, 1, 0) - 1 ~ random walk (one difference)
+ARIMA(0, 1, 0) + 1 ~ random walk with drift (one difference)
+
+
+#### example
+
+```{r}
+us_change <- readr::read_csv("https://otexts.com/fpp3/extrafiles/us_change.csv") %>%
+  mutate(Time = yearquarter(Time)) %>%
+  as_tsibble(index = Time)
+```
+
+```{r}
+us_change %>% 
+  gg_tsdisplay(Consumption)
+```
+
+```{r}
+fit <- us_change %>%
+  model(ARIMA(Consumption ~ PDQ(0,0,0)))
+
+report(fit)
+```
+
+
+
+### Using ACF and PCF with ARIMA
+
+We can use ACF and PACF (of the difference `d` data)
+to determine order of `p` and `q`.
+
+ARIMA(p, d, 0)
+`p` ->
+  * spike on lag `p` of PACF, none past `p`
+  * ACF sinusodial or decaying
+  
+  Seasonal: `p` is the number of spikes at at the seasonal interval on PACF
+  
+  > `p` is found on using the PACF partial autocorrelation because the effects
+    due to short-term intervals are removed. 
+    This finds the "true" autocorrelation 
+
+ARIMA(0, d, q)
+`q` ->
+  * spike on lag `q` of ACF, none past `q`
+  * PACF sinusodial or decaying
+  
+  Seasonal: `q` is the number of spikes at at the seasonal interval on ACF
+  
+  > `q` uses ACF, because if some sequential lags are autocorrelated,
+    then the moving average will be able to use those successive observations
+    to build a better moving average model.
+  
+```{r}
+us_change %>% ACF(Consumption) %>% autoplot()
+```
+
+```{r}
+us_change %>% PACF(Consumption) %>% autoplot()
+```
+
+
+```{r}
+eu_retail <- as_tsibble(fpp2::euretail)
+eu_retail %>% autoplot(value) + ylab("Retail index") + xlab("Year")
+```
+
+
+```{r}
+eu_retail %>% gg_tsdisplay(value %>% difference(4) %>% difference(),
+  plot_type='partial')
+```
+
+Try suggested model:
+
+```{r}
+fit <- eu_retail %>%
+  model(arima = ARIMA(value ~ pdq(0,1,1) + PDQ(0,1,1)))
+fit %>% gg_tsresiduals()
+```
+
+We see a spike on ACF lag 2 and 3. This suggests should should increase the 
+order of the moving to 3 too account for those terms.
+
+```{r}
+fit <- eu_retail %>%
+  model(ARIMA(value ~ pdq(0,1,3) + PDQ(0,1,1)))
+fit %>% gg_tsresiduals()
+```
+
+Which results in a better fit, without autocorrelations.
+
+#### Example 2
+
+```{r}
+h02 <- tsibbledata::PBS %>%
+  filter(ATC2 == "H02") %>%
+  summarise(Cost = sum(Cost)/1e6)
+h02 %>%
+  mutate(log(Cost)) %>%
+  gather() %>%
+  ggplot(aes(x = Month, y = value)) +
+  geom_line() +
+  facet_grid(key ~ ., scales = "free_y") +
+  xlab("Year") + ylab("") +
+  ggtitle("Cortecosteroid drug scripts (H02)")
+```
+
+We choose `log(Cost)` because there is less seasonal variance. 
+
+```{r}
+h02 %>% 
+  gg_tsdisplay(difference(log(Cost), 12), plot_type='partial', lag_max = 24)
+```
+
+The autocorrelation plots strongly suggest an `ARIMA(3,0,0)(2,1,0)`.
+- 1 seasonal difference
+- 0 zero term difference
+
+
+
+## Autocorrelation 2.8
+
+What is ACF?
+
+> autocorrelation measures the linear relationship between lagged values 
+of a time series.
+
+
+Trends
+> When data have a trend, the autocorrelations for small lags tend to be large 
+and positive because observations nearby in time are also nearby in size.
+
+
+
+```{r}
+recent_production <- tsibbledata::aus_production %>%
+  filter(year(Quarter) >= 1992)
+
+recent_production %>%
+  gg_tsdisplay()
+```
+
+```{r}
+recent_production %>%
+  ACF(Beer)
+```
+
+```{r}
+recent_production %>%
+  ACF(Beer) %>%
+  autoplot()
+```
+
+ACF allows use to see season correlations.
+- a lag of 4 because that is the seasonal period
+- negative lag of two, 
+  because that is when the it turns from a trough to a peak.
+
+
+```{r}
+a10 <- tsibbledata::PBS %>%
+  filter(ATC2=="A10") %>%
+  select(Month, Concession, Type, Cost) %>%
+  summarise(TotalC = sum(Cost)) %>%
+  mutate(Cost = TotalC/1e6)
+```
+
+```{r}
+a10 %>%
+  gg_tsdisplay()
+```
+
+In a10, we see a increase trend, and also seasonality in Janurary.
+
+```{r}
+a10 %>%
+  ACF(Cost, lag_max = 48) %>%
+  autoplot()
+```
+
+We see a decrease correlation as the series progresses, 
+because there is an increasing trend.
+
+However, we do see peaks at 12, 24 (intervals of the seasonlity).
+
+
+
+
+
+## next
+

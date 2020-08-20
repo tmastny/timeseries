@@ -1,0 +1,51 @@
+---
+title: "fable-chapter-10"
+output: rmarkdown::html_vignette
+vignette: >
+  %\VignetteIndexEntry{fable-chapter-10}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r, include = FALSE}
+knitr::opts_chunk$set(
+  collapse = TRUE,
+  comment = "#>"
+)
+```
+
+```{r setup}
+library(tsibble)
+library(dplyr)
+library(fable)
+library(tsibbledata)
+library(ggplot2)
+library(lubridate)
+library(feasts)
+library(tidyr)
+```
+
+```{r}
+us_change <- readr::read_csv("https://otexts.com/fpp3/extrafiles/us_change.csv") %>%
+  mutate(Time = yearquarter(Time)) %>%
+  as_tsibble(index = Time)
+```
+
+
+```{r}
+fit <- us_change %>%
+  model(ARIMA(Consumption ~ Income))
+report(fit)
+```
+
+```{r}
+us_change_future <- new_data(us_change, 8) %>% mutate(Income = mean(us_change$Income))
+```
+
+
+```{r}
+forecast(fit, new_data = us_change_future) %>%
+  autoplot(us_change) + xlab("Year") +
+  ylab("Percentage change")
+```
+

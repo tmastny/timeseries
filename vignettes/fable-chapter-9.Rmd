@@ -1,0 +1,641 @@
+---
+title: "fable-chapter-9"
+output: rmarkdown::html_vignette
+vignette: >
+  %\VignetteIndexEntry{fable-chapter-9}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r, include = FALSE}
+knitr::opts_chunk$set(
+  collapse = TRUE,
+  comment = "#>"
+)
+```
+
+```{r setup}
+library(tsibble)
+library(dplyr)
+library(fable)
+library(tsibbledata)
+library(ggplot2)
+library(lubridate)
+library(feasts)
+library(tidyr)
+```
+
+## 9.1
+
+Time series with trends or seasonality are *not* stationary.
+- white noise *is* stationary.
+
+Cyclic behavior is stationary
+- cycles are not of fixed length 
+
+Expectations
+- plot is horizational
+- constant variance
+
+```{r}
+google_2015 <- gafa_stock %>%
+  filter(Symbol == "GOOG") %>%
+  mutate(day = row_number()) %>%
+  update_tsibble(index = day, regular = TRUE) %>%
+  filter(year(Date) == 2015)
+```
+
+```{r}
+google_2015 %>%
+  autoplot(Close)
+```
+
+
+```{r}
+google_2015_diff <- google_2015 %>%
+  mutate(diff_close = difference(Close))
+
+google_2015_diff %>%
+  autoplot(diff_close)
+```
+
+```{r}
+google_2015_diff %>%
+  ACF(diff_close) %>%
+  autoplot()
+```
+
+```{r}
+google_2015_diff %>%
+  features(diff_close, ljung_box, lag = 10)
+```
+
+```{r}
+PBS
+```
+
+Sequential seasonal -> first diffence to get stationary series.
+
+```{r}
+PBS %>%
+  filter(ATC2 == "H02") %>%
+  summarise(Cost = sum(Cost)/1e6) %>%
+  transmute(
+    `Sales ($million)` = Cost,
+    `Log sales` = log(Cost),
+    `Annual change in log sales` = difference(log(Cost), 12),
+    `Doubly differenced log sales` = difference(difference(log(Cost), 12), 1)
+  ) %>%
+  gather("Type", "Sales", !!!syms(measured_vars(.)), factor_key = TRUE) %>%
+  ggplot(aes(x = Month, y = Sales)) +
+  geom_line() +
+  facet_grid(vars(Type), scales = "free_y") +
+  labs(title = "Corticosteroid drug sales", x = "Year", y = NULL)
+```
+
+First differences 
+- the change between one observation and the next.
+
+Seasonal differences 
+- the change between one year to the next
+
+```{r}
+google_2015_diff %>%
+  features(Close, unitroot_kpss)
+```
+
+```{r}
+google_2015_diff %>%
+  features(diff_close, unitroot_kpss)
+```
+
+Determine number of differences to take:
+
+```{r}
+google_2015_diff %>%
+  features(Close, unitroot_ndiffs)
+```
+
+Find number of seasonal diffs
+
+```{r}
+aus_total_retail <- aus_retail %>%
+  summarise(Turnover = sum(Turnover))
+
+
+aus_total_retail %>%
+  mutate(log_turnover = log(Turnover)) %>%
+  features(log_turnover, unitroot_nsdiffs)
+```
+
+Then see if first diffs are needed:
+
+```{r}
+aus_total_retail %>%
+  mutate(log_turnover = difference(log(Turnover), 12)) %>%
+  features(log_turnover, unitroot_ndiffs)
+```
+
+## 9.3
+
+multiple regression model
+- forecast the variable of interest using a linear combination of predictors
+
+autoregression model
+- forecast the variable of interest using a linear combination of past values of the variable.
+
+We normally restrict autoregressive models to stationary data
+
+## 9.4
+
+Moving average smoothing vs. moving average models
+
+* moving average model is used for forecasting future values
+  * only uses previous forecast errors
+
+* moving average smoothing is used for estimating the trend-cycle of past values
+  * looks ahead to next value
+
+
+## 9.5 
+
+ARIMA 
+* acronym for AutoRegressive Integrated Moving Average 
+* combinaton of differencing with autoregression and a moving average model
+
+ARIMA(p, d, q)
+- p:	order of the autoregressive part;
+- d: degree of first differencing involved;
+- q: order of the moving average part.
+
+```{r}
+us_change <- readr::read_csv(
+  "https://otexts.com/fpp3/extrafiles/us_change.csv"
+) %>%
+  mutate(Time = yearquarter(Time)) %>%
+  as_tsibble(index = Time)
+
+us_change
+```
+
+No apparent seasonal patterns, and no trend. Seems to be stationary.
+
+```{r}
+us_change %>%
+  autoplot(Consumption)
+```
+
+```{r}
+us_change %>%
+  features(Consumption, unitroot_kpss)
+```
+
+```{r}
+us_change %>%
+  features(Consumption, unitroot_ndiffs)
+```
+
+`PDQ` estimates seasonal parameters. We are ignoring them for this model.
+
+The default for the non-seasonal components are
+```
+pdq(p = 0:5, d = 0:2, q = 0:5,
+    p_init = 2, q_init = 2)
+```
+One will be automatically chosen to minize `ic` 
+(information criteria, AIC, AICc, BIC, etc).
+
+```{r}
+fit <- us_change %>%
+  model(ARIMA(Consumption ~ PDQ(0,0,0)))
+
+report(fit)
+```
+
+constant `c != 0` and `d = 0`, so forecast will trend to mean.
+
+```{r}
+fit %>% 
+  forecast(h=10) %>% 
+  autoplot(slice(us_change, (n()-80):n()))
+```
+
+```{r}
+us_change %>%
+  model(ARIMA(Consumption ~ PDQ(0,0,0) + 0)) %>%
+  report()
+```
+
+`c = 0` and `d = 0` so forecast will trend to 0.
+
+```{r}
+us_change %>%
+  model(ARIMA(Consumption ~ PDQ(0,0,0) + 0)) %>%
+  forecast(h=10) %>% 
+  autoplot(slice(us_change, (n()-80):n()))
+```
+
+Finding `p` manually from plots:
+
+```{r}
+us_change %>% ACF(Consumption) %>% autoplot()
+```
+
+```{r}
+us_change %>% PACF(Consumption) %>% autoplot()
+```
+
+Look for:
+
+- there is a significant spike at lag p in the PACF, but none beyond lag p
+
+This implies `p = 3`.
+
+Indeed,
+
+```{r}
+report(fit)
+```
+
+```{r}
+fit2 <- us_change %>%
+  model(ARIMA(Consumption ~ pdq(3,0,0) + PDQ(0,0,0)))
+
+report(fit2)
+```
+
+We get better `ic`s with this model.
+
+
+We can also force a comprehensive search of `pdq` values:
+
+```{r}
+fit3 <- us_change %>%
+  model(ARIMA(Consumption ~ PDQ(0,0,0),
+              stepwise = FALSE, approximation = FALSE))
+report(fit3)
+```
+
+And it agrees with the `PACF` plot.
+
+## 9.7
+
+We want to find an ARIMA model on the seasonally-adjusted series.
+
+
+```{r}
+elec_equip <- as_tsibble(fpp2::elecequip)
+elec_dcmp <- elec_equip %>%
+  model(STL(value ~ season(window="periodic"))) %>%
+  components() %>%
+  select(-.model) %>%
+  as_tsibble()
+
+elec_dcmp %>%
+  autoplot(season_adjust)
+```
+
+Non stationary. Let's check first difference:
+
+```{r}
+elec_dcmp %>%
+  gg_tsdisplay(difference(season_adjust), plot_type='partial')
+```
+
+PACF -> p = 3.
+
+The difference looks stationary, -> d = 1.
+
+So ARIMA(3, 1, 0) is an option.
+
+
+```{r}
+selection <- elec_dcmp %>%
+  model(
+    a_310 = ARIMA(season_adjust ~ pdq(3,1,0) + PDQ(0,0,0)),
+    a_410 = ARIMA(season_adjust ~ pdq(4,1,0) + PDQ(0,0,0)),
+    a_210 = ARIMA(season_adjust ~ pdq(2,1,0) + PDQ(0,0,0)),
+    a_311 = ARIMA(season_adjust ~ pdq(3,1,1) + PDQ(0,0,0))
+  )
+
+selection %>%
+  glance()
+```
+
+```{r}
+fit <- selection %>%
+  select(a_311)
+```
+
+```{r}
+fit %>%
+  gg_tsresiduals()
+```
+
+```{r}
+augment(fit) %>%
+  features(.resid, ljung_box, lag = 24, dof = 4)
+```
+
+```{r}
+report(fit)
+```
+
+`c = 0` and `d = 1`. Forecasts will go to a non-zero constant
+(not the mean of the series).
+
+```{r}
+fit %>% 
+  forecast() %>% 
+  autoplot(elec_dcmp) +
+  geom_hline(yintercept = mean(elec_dcmp$season_adjust), color = 'red')
+```
+
+```{r}
+gg_arma(fit)
+```
+
+## 9.9
+
+```{r}
+eu_retail <- as_tsibble(fpp2::euretail)
+eu_retail %>% autoplot(value) + ylab("Retail index") + xlab("Year")
+```
+
+```{r}
+eu_retail %>%
+  gg_season()
+```
+
+
+```{r}
+eu_retail %>% gg_tsdisplay(difference(value, 4))
+```
+
+Need to do a first difference:
+
+```{r}
+eu_retail %>% gg_tsdisplay(value %>% difference(4) %>% difference())
+```
+
+Spike at acf 4 -> `Q = 1` (seasonl period 4.)
+
+Spike at acf 1 -> `q = 1`.
+
+-> 
+
+ARIMA(0,1,1)(0,1,1)
+
+One non-seasonal difference and spike at 1,
+One seasonal difference and spike at 1 (4 first quarter).
+
+```{r}
+eu_retail %>% 
+  gg_tsdisplay(value %>% difference(4) %>% difference(), plot_type = 'partial')
+```
+
+PACF plot also implies `ARIMA(1,1,0)(1,1,0)`.
+
+We'll try both and compare.
+
+```{r}
+fit <- eu_retail %>%
+  model(
+    a1 = ARIMA(value ~ pdq(0,1,1) + PDQ(0,1,1)),
+    a2 = ARIMA(value ~ pdq(0,1,2) + PDQ(0,1,1)),
+    a3 = ARIMA(value ~ pdq(0,1,3) + PDQ(0,1,1)),
+    a4 = ARIMA(value ~ pdq(1,1,0) + PDQ(1,1,0))
+  )
+
+fit %>%
+  glance
+```
+
+```{r}
+fit %>%
+  select(a1) %>%
+  gg_tsresiduals()
+```
+
+```{r}
+fit %>%
+  select(a3) %>%
+  gg_tsresiduals()
+```
+
+```{r}
+fit %>%
+  select(a3, a4) %>%
+  forecast(h = 12) %>%
+  autoplot(eu_retail, level = NULL)
+```
+
+```{r}
+eu_retail %>%
+  model(ARIMA(value)) %>%
+  report
+```
+
+```{r}
+h02 <- tsibbledata::PBS %>%
+  filter(ATC2 == "H02") %>%
+  summarise(Cost = sum(Cost)/1e6)
+
+h02 %>%
+  gg_tsdisplay()
+```
+
+Use `log(Cost)` to make constant variance.
+
+```{r}
+h02 %>%
+  mutate(log(Cost)) %>%
+  gather() %>%
+  ggplot(aes(x = Month, y = value)) +
+  geom_line() +
+  facet_grid(key ~ ., scales = "free_y") +
+  xlab("Year") + ylab("") +
+  ggtitle("Cortecosteroid drug scripts (H02)")
+```
+
+```{r}
+h02 %>% 
+  gg_tsdisplay(difference(log(Cost), 12), plot_type = 'partial', lag_max = 24)
+```
+
+PACF
+- non-seasonal 3 spikes -> p = 3
+- seasonal at 12 and 24 -> P = 2
+
+```{r}
+h02 %>%
+  features(difference(log(Cost), 12), unitroot_kpss)
+```
+
+```{r}
+h02 %>%
+  features(difference(log(Cost), 12), unitroot_ndiffs)
+```
+
+
+```{r}
+h02 %>% 
+  gg_tsdisplay(
+    difference(log(Cost), 12) %>% difference, 
+    plot_type = 'partial',
+    lag_max = 24
+  )
+```
+
+In `d=2`:
+ACF -> 
+- non-seasonal q = 1
+- season q = 2
+
+```{r}
+fit <- h02 %>%
+  model(
+    std = ARIMA(log(Cost) ~ 0 + pdq(3,0,1) + PDQ(0,1,2))
+  )
+
+report(fit)
+```
+
+```{r}
+fit %>%
+  gg_tsresiduals(lag_max = 36)
+```
+
+Fails
+```{r}
+augment(fit) %>%
+  features(.resid, ljung_box, lag = 36, dof = 6)
+```
+
+
+Can't compare AICc with multiple diffs
+
+```{r}
+h02 %>%
+  model(ARIMA(log(Cost))) %>%
+  report
+```
+
+```{r}
+h02 %>%
+  model(ARIMA(log(Cost) ~ 0 + pdq(3,0,1) + PDQ(0,1,2))) %>%
+  forecast() %>%
+  autoplot(h02) +
+    ylab("H02 sales (million scripts)") + xlab("Year")
+```
+
+## 9.10
+
+
+```{r}
+aus_economy <- global_economy %>% filter(Code == "AUS") %>%
+  mutate(Population = Population/1e6)
+
+aus_economy %>%
+  gg_tsdisplay(Population)
+```
+
+```{r}
+aus_economy %>%
+  slice(-n()) %>%
+  stretch_tsibble(.init = 10) %>%
+  model(
+    ETS(Population),
+    ARIMA(Population)
+  ) %>%
+  forecast(h = 1) %>%
+  accuracy(aus_economy)
+```
+
+```{r}
+aus_models <- aus_economy %>%
+  slice(-n()) %>%
+  stretch_tsibble(.init = 10) %>%
+  model(
+    ets = ETS(Population),
+    arima = ARIMA(Population)
+  )
+```
+
+```{r}
+aus_models %>%
+  slice(1) %>%
+  select(arima) %>%
+  report
+```
+
+
+
+
+```{r}
+aus_economy %>%
+  model(ETS(Population)) %>%
+  forecast(h = "5 years") %>%
+  autoplot(aus_economy)
+```
+
+```{r}
+# Consider the cement data beginning in 1988
+cement <- aus_production %>%
+  filter(year(Quarter) >= 1988)
+
+# Use 20 years of the data as the training set
+train <- cement %>%
+  filter(year(Quarter) <= 2007)
+```
+
+```{r}
+fit_arima <- train %>% model(ARIMA(Cement))
+report(fit_arima)
+```
+
+```{r}
+gg_tsresiduals(fit_arima, lag_max = 16)
+```
+
+```{r}
+augment(fit_arima) %>%
+  features(.resid, ljung_box, lag = 16, dof = 5)
+```
+
+```{r}
+fit_ets <- train %>% model(ETS(Cement))
+report(fit_ets)
+```
+
+```{r}
+augment(fit_ets) %>%
+  features(.resid, ljung_box, lag = 16, dof = 6)
+```
+
+```{r}
+# Generate forecasts and compare accuracy over the test set
+bind_rows(
+  fit_arima %>% 
+    accuracy(),
+  fit_ets %>% 
+    accuracy(),
+  fit_arima %>% 
+    forecast(h = "2 years 6 months") %>%
+    accuracy(cement),
+  fit_ets %>% 
+    forecast(h = "2 years 6 months") %>%
+    accuracy(cement)
+)
+```
+
+```{r}
+# Generate forecasts from an ETS model
+fit_ets %>% forecast(h="3 years") %>% autoplot(cement)
+```
+
+```{r}
+# Generate forecasts from an ETS model
+fit_arima %>% forecast(h="3 years") %>% autoplot(cement)
+```
+

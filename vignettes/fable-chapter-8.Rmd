@@ -1,0 +1,378 @@
+---
+title: "fable-chapter-8"
+output: rmarkdown::html_vignette
+vignette: >
+  %\VignetteIndexEntry{fable-chapter-8}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r, include = FALSE}
+knitr::opts_chunk$set(
+  collapse = TRUE,
+  comment = "#>"
+)
+```
+
+```{r setup}
+library(tsibble)
+library(dplyr)
+library(fable)
+library(tsibbledata)
+library(ggplot2)
+library(lubridate)
+library(feasts)
+```
+
+## 8.1
+
+```{r}
+algeria_economy <- tsibbledata::global_economy %>%
+  filter(Country == "Algeria")
+
+algeria_economy
+```
+
+```{r}
+algeria_economy %>%
+  autoplot(Exports) +
+  ylab("Exports (% of GDP)") + xlab("Year")
+```
+
+```{r}
+# Estimate parameters
+fit <- algeria_economy %>%
+  model(ETS(Exports ~ error("A") + trend("N") + season("N"), opt_crit = "mse"))
+fc <- fit %>%
+  forecast(h = 5)
+
+# Accuracy of one-step-ahead training errors
+accuracy(fit) %>%
+  glimpse()
+```
+
+```{r}
+augment(fit) %>%
+  select(Year:.resid)
+```
+
+
+```{r}
+fc %>%
+  autoplot(algeria_economy) +
+  geom_line(aes(y = .fitted, color = 'Fitted'), data = augment(fit))
+```
+
+
+## 8.2
+
+```{r}
+aus_economy <- global_economy %>% filter(Code == "AUS") %>%
+  mutate(Pop = Population/1e6)
+
+aus_economy
+```
+
+```{r}
+autoplot(aus_economy, Pop)
+```
+
+
+```{r}
+fit <- aus_economy %>%
+  model(AAN = ETS(Pop ~ error("A") + trend("A") + season("N")))
+
+accuracy(fit) %>%
+  glimpse()
+```
+
+```{r}
+fc <- fit %>% forecast(h=10)
+```
+
+```{r}
+fc %>%
+  autoplot(aus_economy) +
+  geom_line(aes(y = .fitted, color = 'Fitted'), data = augment(fit))
+```
+
+```{r}
+aus_economy %>%
+  model(
+    `Holt's method` = ETS(Pop ~ error("A") + trend("A") + season("N")),
+    `Damped Holt's method` = ETS(
+      Pop ~ error("A") + trend("Ad", phi = 0.9) + season("N")
+    )
+  ) %>%
+  forecast(h=15) %>%
+  autoplot(aus_economy, level = NULL) +
+  ggtitle("Forecasts from Holt's method") + xlab("Year") +
+  ylab("Population of Australia (millions)") +
+  guides(colour=guide_legend(title="Forecast"))
+```
+
+
+```{r}
+www_usage <- as_tsibble(WWWusage)
+www_usage %>% 
+  autoplot(value) +
+  xlab("Minute") + ylab("Number of users")
+```
+
+```{r}
+www_usage %>%
+  stretch_tsibble(.init = 10) %>%
+  model(
+    SES = ETS(value ~ error("A") + trend("N") + season("N")),
+    Holt = ETS(value ~ error("A") + trend("A") + season("N")),
+    Damped = ETS(value ~ error("A") + trend("Ad") + season("N"))
+  ) %>%
+  forecast(h=1) %>%
+  accuracy(www_usage)
+```
+
+```{r}
+fit <- www_usage %>%
+  model(Damped = ETS(value ~ error("A") + trend("Ad") + season("N")))
+
+# Estimated parameters:
+tidy(fit)
+```
+
+```{r}
+fit %>%
+  forecast(h = 10) %>%
+  autoplot(www_usage)
+```
+
+## 8.3
+
+```{r}
+aus_holidays <- tourism %>%
+  filter(Purpose == "Holiday") %>%
+  summarise(Trips = sum(Trips))
+
+autoplot(aus_holidays)
+```
+
+
+```{r}
+fit <- aus_holidays %>%
+  model(
+    additive = ETS(Trips ~ error("A") + trend("A") + season("A")),
+    multiplicative = ETS(Trips ~ error("M") + trend("A") + season("M"))
+  )
+
+accuracy(fit)
+```
+
+cv test
+
+```{r}
+aus_holidays %>%
+  stretch_tsibble(.init = 10) %>%
+  model(
+    additive = ETS(Trips ~ error("A") + trend("A") + season("A")),
+    multiplicative = ETS(Trips ~ error("M") + trend("A") + season("M"))
+  ) %>% 
+  forecast(h=1) %>%
+  accuracy(aus_holidays)
+```
+
+
+```{r}
+fc <- fit %>% forecast(h = "3 years")
+
+fc %>%
+  autoplot(aus_holidays, level = NULL) + xlab("Year") +
+  ylab("Overnight trips (millions)") +
+  scale_color_brewer(type = "qual", palette = "Dark2")
+```
+
+```{r}
+fit %>%
+  select(multiplicative) %>%
+  components() %>%
+  autoplot()
+```
+
+```{r}
+fit %>%
+  select(additive) %>%
+  components() %>%
+  autoplot()
+```
+
+```{r}
+pedestrian
+```
+
+
+```{r}
+sth_cross_ped <- pedestrian %>%
+  filter(
+    Sensor == "Southern Cross Station", 
+    yearmonth(Date) == yearmonth("2016 July")
+  ) %>%
+  index_by(Date) %>%
+  summarise(Count = sum(Count))
+
+
+sth_cross_ped %>%
+  model(hw = ETS(Count ~ error("M") + trend("Ad") + season("M"))) %>%
+  forecast(h = "2 weeks") %>%
+  autoplot(sth_cross_ped)
+```
+
+```{r}
+sth_cross_ped %>%
+  model(hw = ETS(Count ~ error("M") + trend("A") + season("A"))) %>%
+  forecast(h = "2 weeks") %>%
+  autoplot(sth_cross_ped)
+```
+
+```{r}
+sth_cross_ped %>%
+  stretch_tsibble(.init = 10) %>%
+  model(
+    add = ETS(Count ~ error("M") + trend("A") + season("A")),
+    sm = ETS(Count ~ error("M") + trend("A") + season("M")),
+    damp = ETS(Count ~ error("M") + trend("Ad") + season("M"))
+  ) %>%
+  forecast(h = 1) %>%
+  accuracy(sth_cross_ped)
+```
+
+```{r}
+fit <- sth_cross_ped %>%
+  model(
+    add = ETS(Count ~ error("M") + trend("A") + season("A")),
+    sm = ETS(Count ~ error("M") + trend("A") + season("M")),
+    damp = ETS(Count ~ error("M") + trend("Ad") + season("M"))
+  ) 
+
+accuracy(fit)
+```
+
+```{r}
+fit %>%
+  forecast(h = "2 weeks") %>%
+  autoplot(sth_cross_ped, level = NULL) +
+  geom_line(aes(y = .fitted, color = .model), data = augment(fit))
+```
+
+## 8.6
+
+```{r}
+aus_holidays <- tourism %>%
+  filter(Purpose == "Holiday") %>%
+  summarise(Trips = sum(Trips))
+
+aus_holidays
+```
+
+```{r}
+aus_holidays %>%
+  autoplot()
+```
+
+```{r}
+fit <- aus_holidays %>%
+  model(ETS(Trips))
+
+report(fit)
+```
+
+```{r}
+components(fit) %>%
+  autoplot()
+```
+
+
+
+```{r}
+residuals(fit)
+```
+
+```{r}
+residuals(fit, type = 'response')
+```
+
+## 8.7
+
+```{r}
+fit %>%
+  forecast(h = 8) %>%
+  autoplot(aus_holidays)
+```
+
+
+```{r}
+fit2 <- aus_holidays %>%
+  model(
+    std = ETS(Trips),
+    trend = ETS(Trips ~ trend("A")),
+    error = ETS(Trips ~ error("A")),
+    season = ETS(Trips ~ trend("A") + season("N"))
+  )
+
+fit2 %>%
+  forecast(h = 8) %>%
+  autoplot(aus_holidays, level = NULL)
+```
+
+adds in season by default
+
+```{r}
+fit3 <- aus_holidays %>%
+  model(
+    ets_a = ETS(Trips ~ error("A") + trend("N") + season('N')),
+    ets_m = ETS(Trips ~ error("M") + trend("N") + season('N')),
+    holt_a = ETS(Trips ~ error("A") + trend("A") + season('N')),
+    holt_m = ETS(Trips ~ error("M") + trend("A") + season('N')),
+    holt_damp = ETS(Trips ~ error("A") + trend("Ad") + season('N')),
+  )
+
+fit3 %>%
+  forecast(h = 8) %>%
+  autoplot(aus_holidays, level = NULL)
+```
+
+Multiplicative seasonality better for trending seasons.
+
+```{r}
+fit4 <- aus_holidays %>%
+  model(
+    season_a = ETS(Trips ~ error("A") + trend("A") + season('A')),
+    season_m = ETS(Trips ~ error("M") + trend("A") + season('M'))
+  )
+
+fit4 %>%
+  forecast(h = 8) %>%
+  autoplot(aus_holidays, level = NULL)
+```
+
+```{r}
+fit5 <- aus_holidays %>%
+  model(
+    season_a = ETS(Trips ~ error("A") + trend("Ad") + season('A')),
+    season_m = ETS(Trips ~ error("M") + trend("Ad") + season('M'))
+  )
+
+fit5 %>%
+  forecast(h = 8) %>%
+  autoplot(aus_holidays, level = NULL)
+```
+
+The multiplicative season component doesn't change over time,
+but because the series is multiplicative, the predicted value
+of the seasonality increases as the trend increases.
+
+```{r}
+fit5 %>%
+  select(season_m) %>%
+  components() %>%
+  autoplot()
+```
+
+

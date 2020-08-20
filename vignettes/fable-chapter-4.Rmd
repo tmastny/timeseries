@@ -501,4 +501,34 @@ hsales %>%
   gg_tsdisplay()
 ```
 
+```{r}
+hsales_train <- hsales %>%
+  filter_index(~ "1993 Dec")
+
+hsales_fit <- hsales_train %>%
+  model(
+    SNAIVE(),
+    NAIVE(),
+    RW(value ~ drift())
+  )
+```
+
+```{r}
+hsales_fit %>%
+  forecast(h = 12 * 2) %>%
+  accuracy(hsales) %>%
+  arrange(RMSE)
+```
+
+```{r}
+hsales_fit %>%
+  forecast(h = 12 * 2) %>%
+  autoplot(hsales)
+```
+
+```{r}
+hsales_fit %>%
+  select(`SNAIVE()`) %>%
+  gg_tsresiduals()
+```
 
